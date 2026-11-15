@@ -7,6 +7,7 @@ import unittest
 
 import snapshot
 
+SUBDIR = snapshot.DIST_SUBDIR
 MAKEFILE = (
     "PORTNAME=\tnova-bhyve\n"
     "DISTVERSION=\t0.9.4\n"
@@ -30,7 +31,10 @@ class VersionTestCase(unittest.TestCase):
 class StampTestCase(unittest.TestCase):
     def test_distversion_is_replaced_and_portrevision_dropped(self):
         self.assertEqual(
-            "PORTNAME=\tnova-bhyve\nDISTVERSION=\t0.9.4.9\nCATEGORIES=\tnet python\n",
+            "PORTNAME=\tnova-bhyve\n"
+            "DISTVERSION=\t0.9.4.9\n"
+            "DIST_SUBDIR=\tstackbsd-snapshot\n"
+            "CATEGORIES=\tnet python\n",
             snapshot.stamp_makefile(MAKEFILE, "0.9.4.9"),
         )
 
@@ -38,6 +42,10 @@ class StampTestCase(unittest.TestCase):
         self.assertRaises(
             snapshot.SnapshotError, snapshot.stamp_makefile, "PORTNAME=\tx\n", "1.0"
         )
+
+    def test_a_makefile_with_its_own_dist_subdir_is_refused(self):
+        text = MAKEFILE + "DIST_SUBDIR=\tx\n"
+        self.assertRaises(snapshot.SnapshotError, snapshot.stamp_makefile, text, "1.0")
 
     def test_distinfo_names_the_distfile(self):
         snap = snapshot.Snapshot(
@@ -52,8 +60,8 @@ class StampTestCase(unittest.TestCase):
         )
         self.assertEqual(
             "TIMESTAMP = 1794434097\n"
-            f"SHA256 (nova_bhyve-0.9.4.9.tar.gz) = {'ab' * 32}\n"
-            "SIZE (nova_bhyve-0.9.4.9.tar.gz) = 33396\n",
+            f"SHA256 (stackbsd-snapshot/nova_bhyve-0.9.4.9.tar.gz) = {'ab' * 32}\n"
+            "SIZE (stackbsd-snapshot/nova_bhyve-0.9.4.9.tar.gz) = 33396\n",
             snapshot.distinfo(snap),
         )
 
@@ -145,12 +153,12 @@ class TakeTestCase(unittest.TestCase):
             f'[demo-pkg]\nurl = "{self.repo}"\nport = "net/demo-pkg"\n'
         )
         self.assertEqual(0, self.run_main())
-        distfile = self.tmp / "distfiles" / "demo_pkg-1.2.0.1.tar.gz"
+        distfile = self.tmp / "distfiles" / SUBDIR / "demo_pkg-1.2.0.1.tar.gz"
         self.assertTrue(distfile.exists())
         self.assertIn("DISTVERSION=\t1.2.0.1\n", (self.port / "Makefile").read_text())
         info = (self.port / "distinfo").read_text()
         self.assertIn(
-            f"SIZE (demo_pkg-1.2.0.1.tar.gz) = {distfile.stat().st_size}", info
+            f"SIZE ({SUBDIR}/demo_pkg-1.2.0.1.tar.gz) = {distfile.stat().st_size}", info
         )
         self.assertIn('"version": "1.2.0.1"', (self.tmp / "manifest.json").read_text())
 
@@ -159,7 +167,9 @@ class TakeTestCase(unittest.TestCase):
             f'[demo-pkg]\nurl = "{self.repo}"\nport = "net/demo-pkg"\n'
         )
         self.assertEqual(0, self.run_main("--ref", "demo-pkg=v1.2.0"))
-        self.assertTrue((self.tmp / "distfiles" / "demo_pkg-1.2.0.tar.gz").exists())
+        self.assertTrue(
+            (self.tmp / "distfiles" / SUBDIR / "demo_pkg-1.2.0.tar.gz").exists()
+        )
 
     def test_a_missing_port_fails(self):
         (self.tmp / "sources.toml").write_text(

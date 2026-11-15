@@ -15,6 +15,7 @@ import tomllib
 
 DESCRIBE = re.compile(r"^v(?P<tag>\d+(\.\d+)*)-(?P<ahead>\d+)-g[0-9a-f]+$")
 DISTVERSION = re.compile(r"^DISTVERSION=.*$", re.MULTILINE)
+DIST_SUBDIR = "stackbsd-snapshot"
 PORTREVISION = re.compile(r"^PORTREVISION=.*\n", re.MULTILINE)
 
 
@@ -123,8 +124,8 @@ def build_sdist(repo, commit, version, distfiles):
         built = list(out.glob("*.tar.gz"))
         if len(built) != 1:
             raise SnapshotError(f"expected one sdist and found {len(built)}")
-        distfiles.mkdir(parents=True, exist_ok=True)
-        target = distfiles / built[0].name
+        target = distfiles / DIST_SUBDIR / built[0].name
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(built[0].read_bytes())
         return target
 
@@ -151,7 +152,10 @@ def take(source, work, distfiles):
 
 def stamp_makefile(text, version):
     """Return the port Makefile with the snapshot version."""
-    text, count = DISTVERSION.subn(f"DISTVERSION=\t{version}", text)
+    if "DIST_SUBDIR=" in text:
+        raise SnapshotError("the port already sets DIST_SUBDIR")
+    stamped = f"DISTVERSION=\t{version}\nDIST_SUBDIR=\t{DIST_SUBDIR}"
+    text, count = DISTVERSION.subn(stamped, text)
     if count != 1:
         raise SnapshotError(f"expected one DISTVERSION line and found {count}")
     return PORTREVISION.sub("", text)
@@ -159,10 +163,11 @@ def stamp_makefile(text, version):
 
 def distinfo(snap):
     """Return the distinfo of a snapshot."""
+    name = f"{DIST_SUBDIR}/{snap.distfile}"
     return (
         f"TIMESTAMP = {snap.timestamp}\n"
-        f"SHA256 ({snap.distfile}) = {snap.sha256}\n"
-        f"SIZE ({snap.distfile}) = {snap.size}\n"
+        f"SHA256 ({name}) = {snap.sha256}\n"
+        f"SIZE ({name}) = {snap.size}\n"
     )
 
 
