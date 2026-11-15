@@ -68,7 +68,8 @@ upload() {
 	remote=$PUBLISH/$series/$ABI
 	# packages must land before the link that makes them current
 	rsync -a --mkpath "$stage/" "$remote/$store/$stamp/"
-	rsync -a --mkpath "$site/$link" "$remote/$link"
+	# the link is copied into its parent so an existing one is replaced
+	rsync -a --mkpath "$site/$link" "$remote/$(dirname "$link")/"
 	rsync -a --delete "$site/$store/" "$remote/$store/"
 	echo "$name published to $remote/$link"
 }
