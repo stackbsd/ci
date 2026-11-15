@@ -1,5 +1,5 @@
 #!/bin/sh
-# usage: publish.sh <channel> <latest|quarterly>
+# usage: publish.sh <series> <nightly|release> <latest|quarterly>
 set -eu
 
 JAIL=15amd64
@@ -10,61 +10,102 @@ LOGS=/usr/local/poudriere/data/logs/bulk
 KEEP=7
 SIGNING_KEY=
 PUBLISH=
+
 conf=${STACKBSD_CI_CONF:-/usr/local/etc/stackbsd-ci.conf}
-if [ -r "$conf" ]; then . "$conf"; fi
-
-channel=$1
-stream=$2
-name=$channel-$stream
-overlay=$STATE/overlays/$name
-built=$PACKAGES/$JAIL-$stream-$channel
-site=$STATE/site/$ABI
-stamp=$(date -u +%Y%m%dT%H%M%SZ)
-stage=$site/$name.d/$stamp
-
-# only packages of our own ports are published
-mkdir -p "$stage/All"
-for pkg in "$built"/All/*.pkg; do
-	origin=$(pkg query -F "$pkg" %o)
-	if [ -d "$overlay/$origin" ]; then
-		cp "$pkg" "$stage/All/"
-	fi
-done
-count=$(find "$stage/All" -name '*.pkg' | wc -l | tr -d ' ')
-if [ "$count" -eq 0 ]; then
-	echo "no packages of our own ports in $built" >&2
-	exit 1
+if [ -r "$conf" ]; then
+	. "$conf"
 fi
 
-# a dependency built here is missing from the official repo at this version
-log=$LOGS/$JAIL-$stream-$channel/latest/.poudriere.ports.built
-if [ -r "$log" ]; then
-	awk '{print $1}' "$log" | sed 's/@.*//' | sort -u | while read -r origin; do
-		# poudriere always builds pkg itself
-		if [ "$origin" != ports-mgmt/pkg ] && [ ! -d "$overlay/$origin" ]; then
-			echo "warning: $origin was built locally and is not published"
+stage_packages() {
+	mkdir -p "$stage/All"
+	for pkg in "$built"/All/*.pkg; do
+		origin=$(pkg query -F "$pkg" %o)
+		if [ -d "$overlay/$origin" ]; then
+			cp "$pkg" "$stage/All/"
 		fi
 	done
-fi
 
-if [ -n "$SIGNING_KEY" ]; then
-	pkg repo -q "$stage" "$SIGNING_KEY"
-else
-	pkg repo -q "$stage"
-fi
-ln -sfn "$name.d/$stamp" "$site/$name"
+	count=$(find "$stage/All" -name '*.pkg' | wc -l | tr -d ' ')
+	if [ "$count" -eq 0 ]; then
+		echo "no packages of our own ports in $built" >&2
+		exit 1
+	fi
+}
 
-# drop all but the newest copies
-ls -1 "$site/$name.d" | sort -r | tail -n "+$((KEEP + 1))" | while read -r old; do
-	rm -rf "$site/$name.d/${old:?}"
-done
+warn_local_builds() {
+	log=$LOGS/$JAIL-$stream-$set_name/latest/.poudriere.ports.built
+	if [ ! -r "$log" ]; then
+		return
+	fi
+	awk '{print $1}' "$log" | sed 's/@.*//' | sort -u | while read -r origin; do
+		# poudriere always builds pkg itself
+		if [ "$origin" = ports-mgmt/pkg ] || [ -d "$overlay/$origin" ]; then
+			continue
+		fi
+		echo "warning: $origin was built locally and is not published"
+	done
+}
 
+sign_repo() {
+	if [ -n "$SIGNING_KEY" ]; then
+		pkg repo -q "$stage" "$SIGNING_KEY"
+	else
+		pkg repo -q "$stage"
+	fi
+}
+
+make_current() {
+	mkdir -p "$(dirname "$site/$link")"
+	ln -sfn "$target" "$site/$link"
+
+	ls -1 "$site/$store" | sort -r | tail -n "+$((KEEP + 1))" |
+		while read -r old; do
+			rm -rf "$site/$store/${old:?}"
+		done
+}
+
+upload() {
+	remote=$PUBLISH/$series/$ABI
+	# packages must land before the link that makes them current
+	rsync -a --mkpath "$stage/" "$remote/$store/$stamp/"
+	rsync -a --mkpath "$site/$link" "$remote/$link"
+	rsync -a --delete "$site/$store/" "$remote/$store/"
+	echo "$name published to $remote/$link"
+}
+
+series=$1
+channel=$2
+stream=$3
+
+name=$channel-$stream
+set_name=$(echo "$series" | tr . _)_$channel
+overlay=$STATE/overlays/$name
+built=$PACKAGES/$JAIL-$stream-$set_name
+
+site=$STATE/site/$series/$ABI
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+store=.store/$name
+stage=$site/$store/$stamp
+
+# released packages sit at the top and nightly ones a level down
+case "$channel" in
+release)
+	link=$stream
+	target=$store/$stamp
+	;;
+*)
+	link=$channel/$stream
+	target=../$store/$stamp
+	;;
+esac
+
+# only packages of our own ports are published
+stage_packages
+warn_local_builds
+sign_repo
+make_current
 echo "$name staged $count packages in $stage"
-if [ -z "$PUBLISH" ]; then
-	exit 0
+
+if [ -n "$PUBLISH" ]; then
+	upload
 fi
-# packages must land before the link that makes them current
-rsync -a --mkpath "$stage/" "$PUBLISH/$ABI/$name.d/$stamp/"
-rsync -a "$site/$name" "$PUBLISH/$ABI/"
-rsync -a --delete "$site/$name.d/" "$PUBLISH/$ABI/$name.d/"
-echo "$name published to $PUBLISH/$ABI/$name"
