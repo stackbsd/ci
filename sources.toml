@@ -1,0 +1,19 @@
+[neutron-bsdbridge]
+url = "https://github.com/stackbsd/neutron-bsdbridge"
+port = "net/neutron-bsdbridge"
+
+[nova-bhyve]
+url = "https://github.com/stackbsd/nova-bhyve"
+port = "net/nova-bhyve"
+
+[cinder-zfs-driver]
+url = "https://github.com/stackbsd/cinder-zfs-driver"
+port = "net/cinder-zfs-driver"
+
+[os-brick-freebsd]
+url = "https://github.com/stackbsd/os-brick-freebsd"
+port = "net/os-brick-freebsd"
+
+[horizon-theme-daemon]
+url = "https://github.com/stackbsd/horizon-theme-daemon"
+port = "net/horizon-theme-daemon"
