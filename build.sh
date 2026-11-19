@@ -6,6 +6,7 @@ JAIL=15amd64
 ABI=FreeBSD:15:amd64
 STATE=/var/db/stackbsd-ci
 TREES=/usr/local/poudriere/ports
+PACKAGES=/usr/local/poudriere/data/packages
 DISTFILES=/usr/ports/distfiles
 PORTS_URL=https://github.com/stackbsd/ports
 PORTS_REF=main
@@ -59,6 +60,21 @@ read_series() {
 		;;
 	esac
 	echo "$series" > "$run/series"
+	set_name=$(echo "$series" | tr . _)_$channel
+}
+
+drop_fetched() {
+	if cmp -s "$STATE/runs/$name/last/pin" "$run/pin"; then
+		return
+	fi
+	echo "pin moved, dropping the fetched packages"
+	for file in "$PACKAGES/$JAIL-$stream-$set_name"/All/*.pkg; do
+		[ -e "$file" ] || continue
+		origin=$(pkg query -F "$file" %o) || continue
+		if [ ! -d "$overlay/$origin" ]; then
+			rm -f "$file"
+		fi
+	done
 }
 
 snapshot_drivers() {
@@ -71,7 +87,6 @@ snapshot_drivers() {
 }
 
 build_packages() {
-	set_name=$(echo "$series" | tr . _)_$channel
 	rc=0
 	poudriere bulk \
 		-j "$JAIL" \
@@ -117,6 +132,8 @@ read_series
 if [ "$channel" != release ]; then
 	snapshot_drivers "$@"
 fi
+# a kept package is built from source when its dependencies change
+drop_fetched
 build_packages
 if [ "$channel" != dev ]; then
 	"$here/publish.sh" "$series" "$channel" "$stream"
